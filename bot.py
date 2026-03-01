@@ -22,7 +22,15 @@ class sonny(discord.Client):
 
     async def setup_hook(self):
         await self.tree.sync()
-        print(f"Synced slash commands for {self.user}")
+
+    async def on_ready(self):
+        print(f"Logged in as {self.user} (ID: {self.user.id})")
+        await self.change_presence(
+            activity=discord.Activity(
+                type=discord.ActivityType.playing, name="with penguins 🐧"
+            ),
+            status=discord.Status.online,
+        )
 
 
 client = sonny()
