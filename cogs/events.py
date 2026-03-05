@@ -2,8 +2,15 @@ import os
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
+from datetime import datetime
 
 load_dotenv()
+
+channel_general = os.getenv("GENERAL_CHANNEL_ID")
+channel_support = os.getenv("SUPPORT_CHANNEL_ID")
+channel_vc_text = os.getenv("VC_TEXT_CHANNEL_ID")
+dcadmin_role_id = os.getenv("DCADMIN_ROLE_ID")
+networkadmin_role_id = os.getenv("NETWORK_ADMIN_ROLE_ID")
 
 
 # --- EVENT: MEMBER JOIN, AUTO ROLE & WELCOME MESSAGE
@@ -14,9 +21,34 @@ class Events(commands.Cog):
         self.welcome_channel_id = int(os.getenv("WELCOME_CHANNEL_ID"))
         self.initial_member_role_id = int(os.getenv("INITIAL_MEMBER_ROLE_ID"))
 
+    def create_welcome_embed(self, member: discord.Member):
+        embed = discord.Embed(
+            title="Welcome 🎉🎉",
+            description=f"Welcome to the ahmza discord server {member.mention}.\nBefore you can do much you will need to be assigned a role by a <@&{dcadmin_role_id}> or <@&{networkadmin_role_id}>",
+            colour=0x00B0F4,
+            timestamp=datetime.now(),
+        )
+
+        embed.add_field(
+            name="Key Info",
+            value=(
+                f"Once you have your role checkout these pages:\n\n"
+                f"- <#{channel_general}> - For general conversation\n"
+                f"- <#{channel_support}> - For support with ahmza.com services\n"
+                f"- <#{channel_vc_text}> - For messages while in voice chat"
+            ),
+            inline=False,
+        )
+
+        embed.set_footer(
+            text="I hope you enjoy your stay.",
+            icon_url="https://cdn.discordapp.com/app-icons/1477746789493899449/b439974fe19aaf9143bd3be7f36fd593.png?size=256",
+        )
+        return embed
+
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member):
-        # 1. Assign the initial role
+        # --- Assign the initial role ---
         role = member.guild.get_role(self.initial_member_role_id)
         if role:
             try:
@@ -26,27 +58,19 @@ class Events(commands.Cog):
             except Exception as e:
                 print(f"An unexpected error occurred: {e}")
 
-        # 2. Send the welcome message
+        # --- Send the welcome message ---
         channel = self.bot.get_channel(self.welcome_channel_id)
         if channel:
-            welcome_embed = discord.Embed(
-                title="Welcome 🎉🎉🎉",
-                description=f"Hey {member.mention}, welcome to the AHMZA discord server!",
-                color=discord.Color.blue(),
-            )
-            welcome_embed.set_thumbnail(url=member.display_avatar.url)
-            welcome_embed.add_field(
-                name="Total Members", value=f"{member.guild.member_count}", inline=True
-            )
-            welcome_embed.set_footer(
-                text="You will need to be given a role before you can do more"
-            )
+            embed = self.create_welcome_embed(member)
+            await channel.send(embed=embed)
 
-            await channel.send(embed=welcome_embed)
-        else:
-            print(
-                f"Error: Could not find welcome channel with ID {self.welcome_channel_id}"
-            )
+    @commands.command(name="testwelcome")
+    @commands.has_permissions(administrator=True)
+    async def test_welcome(self, ctx):
+        # --- Manually trigger welcome message to test embed ---
+        embed = self.create_welcome_embed(ctx.author)
+
+        await ctx.send(embed=embed)
 
 
 async def setup(bot: commands.Bot):
