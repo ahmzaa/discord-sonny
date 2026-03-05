@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-admin_role_id = int(os.getenv("ADMIN_MEMBER_ROLE_ID"))
+networkadmin_role_id = int(os.getenv("NETWORKADMIN_ROLE_ID"))
 
 
 class Admin(commands.Cog):
@@ -14,7 +14,9 @@ class Admin(commands.Cog):
         self.bot = bot
 
     @app_commands.command(name="reload", description="Reloads a specific cog")
-    @app_commands.checks.has_role(admin_role_id)  # Only the bot creator can run this
+    @app_commands.checks.has_role(
+        networkadmin_role_id
+    )  # Only the bot creator can run this
     async def reload(self, interaction: discord.Interaction, extension: str):
         try:
             # We use the internal load/unload logic
