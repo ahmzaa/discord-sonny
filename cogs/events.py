@@ -10,7 +10,7 @@ channel_general = os.getenv("GENERAL_CHANNEL_ID")
 channel_support = os.getenv("SUPPORT_CHANNEL_ID")
 channel_vc_text = os.getenv("VC_TEXT_CHANNEL_ID")
 dcadmin_role_id = os.getenv("DCADMIN_ROLE_ID")
-networkadmin_role_id = os.getenv("NETWORK_ADMIN_ROLE_ID")
+networkadmin_role_id = os.getenv("NETWORKADMIN_ROLE_ID")
 
 
 # --- EVENT: MEMBER JOIN, AUTO ROLE & WELCOME MESSAGE
@@ -24,7 +24,11 @@ class Events(commands.Cog):
     def create_welcome_embed(self, member: discord.Member):
         embed = discord.Embed(
             title="Welcome 🎉🎉",
-            description=f"Welcome to the ahmza discord server {member.mention}.\nBefore you can do much you will need to be assigned a role by a <@&{dcadmin_role_id}> or <@&{networkadmin_role_id}>",
+            description=(
+                f"Welcome to the ahmza discord server {member.mention}.\n\n"
+                f"Before you can do much you will need to be assigned a role by a"
+                f"<@&{dcadmin_role_id}> or <@&{networkadmin_role_id}>"
+            ),
             colour=0x00B0F4,
             timestamp=datetime.now(),
         )
