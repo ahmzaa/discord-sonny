@@ -10,6 +10,10 @@ Sonny is the discord bot for my server.
 - Autorole on new user join
 - Ping - returns latency
 - Clear - Clears `n` amount of messages from a channel
+- live reload of cogs
+- amp instance status
+- system status
+- modular
 
 ## Desired features
 
@@ -35,6 +39,8 @@ Sonny is the discord bot for my server.
 4. Integration
 
 - /amp [instanceid] [options]: control amp game server directly from discord.
+  - [x] Get Instance status
+  - [ ] Manage Instance Power
 - /weather [city]: Uses a free API (like wttr.in) to show the current forecast.
 - /stock [symbol] or /crypto [coin]: Fetches real-time prices from a financial API.
 - /translate [text] [language]: Uses the Google Translate API to instantly convert messages.
