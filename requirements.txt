@@ -1,0 +1,6 @@
+discord.py
+psutil
+python-dotenv
+cc-ampapi
+aiohttp
+typing_extensions
