@@ -7,7 +7,7 @@ class General(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @app_commands.command(name="ping", description="Check bots latency")
+    @app_commands.command(name="ping", description="Check bot's latency")
     async def ping(self, interaction: discord.Interaction):
         latency = round(self.bot.latency * 1000)
         await interaction.response.send_message(f"Pong! 🏓 ({latency}ms)")
@@ -32,8 +32,15 @@ class General(commands.Cog):
                 f"Successfully purged {len(deleted)} messages of heresy!",
                 ephemeral=True,
             )
-        except Exception as e:
-            await interaction.followup.send(f"An error occurred: {e}", ephemeral=True)
+        except discord.Forbidden:
+            await interaction.followup.send(
+                "I don't have permission to delete messages here.", ephemeral=True
+            )
+        except discord.HTTPException as e:
+            print(f"Error in /clear purge: {e}")
+            await interaction.followup.send(
+                "Failed to purge messages. Check bot logs for details.", ephemeral=True
+            )
 
     @clear.error
     async def clear_error(

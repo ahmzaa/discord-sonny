@@ -1,15 +1,14 @@
 """Unit tests for cogs/system.py."""
 
-import asyncio
 import pytest
 import discord
-from unittest.mock import AsyncMock, MagicMock, patch, call
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from cogs.system import System
 
 
-def _psutil_mocks():
-    """Returns a dict of patch targets and their mock return values."""
+def _make_mocks_and_loop():
+    """Returns (mocks dict, mock_loop) for patching psutil and the event loop."""
     ram = MagicMock()
     ram.percent = 42.0
     ram.used = 1024**3  # 1 GB
@@ -18,7 +17,7 @@ def _psutil_mocks():
     disk = MagicMock()
     disk.percent = 55.0
 
-    return {
+    mocks = {
         "psutil.virtual_memory": MagicMock(return_value=ram),
         "psutil.disk_usage": MagicMock(return_value=disk),
         "psutil.boot_time": MagicMock(return_value=0.0),
@@ -26,11 +25,18 @@ def _psutil_mocks():
         "platform.release": MagicMock(return_value="5.15.0"),
     }
 
+    mock_loop = MagicMock()
+    # run_in_executor is called 4 times (cpu, ram, disk, boot_time)
+    # Return values: cpu=25.0, ram mock, disk mock, boot_time=0.0
+    mock_loop.run_in_executor = AsyncMock(side_effect=[25.0, ram, disk, 0.0])
+
+    return mocks, mock_loop
+
 
 @pytest.mark.asyncio
 async def test_system_defers_first(mock_bot, mock_interaction):
     """response.defer() must be called before followup.send()."""
-    mocks = _psutil_mocks()
+    mocks, mock_loop = _make_mocks_and_loop()
     call_order = []
 
     mock_interaction.response.defer = AsyncMock(
@@ -41,16 +47,13 @@ async def test_system_defers_first(mock_bot, mock_interaction):
     )
 
     with (
-        patch("asyncio.get_event_loop") as mock_loop_fn,
+        patch("asyncio.get_running_loop", return_value=mock_loop),
         patch("psutil.virtual_memory", mocks["psutil.virtual_memory"]),
         patch("psutil.disk_usage", mocks["psutil.disk_usage"]),
         patch("psutil.boot_time", mocks["psutil.boot_time"]),
         patch("platform.system", mocks["platform.system"]),
         patch("platform.release", mocks["platform.release"]),
     ):
-        mock_loop = MagicMock()
-        mock_loop.run_in_executor = AsyncMock(return_value=25.0)
-        mock_loop_fn.return_value = mock_loop
         cog = System(mock_bot)
         await cog.system_status.callback(cog, mock_interaction)
 
@@ -60,19 +63,16 @@ async def test_system_defers_first(mock_bot, mock_interaction):
 @pytest.mark.asyncio
 async def test_system_embed_has_required_fields(mock_bot, mock_interaction):
     """Embed must contain CPU, RAM, Disk, OS, and uptime fields."""
-    mocks = _psutil_mocks()
+    mocks, mock_loop = _make_mocks_and_loop()
 
     with (
-        patch("asyncio.get_event_loop") as mock_loop_fn,
+        patch("asyncio.get_running_loop", return_value=mock_loop),
         patch("psutil.virtual_memory", mocks["psutil.virtual_memory"]),
         patch("psutil.disk_usage", mocks["psutil.disk_usage"]),
         patch("psutil.boot_time", mocks["psutil.boot_time"]),
         patch("platform.system", mocks["platform.system"]),
         patch("platform.release", mocks["platform.release"]),
     ):
-        mock_loop = MagicMock()
-        mock_loop.run_in_executor = AsyncMock(return_value=25.0)
-        mock_loop_fn.return_value = mock_loop
         cog = System(mock_bot)
         await cog.system_status.callback(cog, mock_interaction)
 
@@ -88,45 +88,40 @@ async def test_system_embed_has_required_fields(mock_bot, mock_interaction):
 
 
 @pytest.mark.asyncio
-async def test_system_uses_executor_for_cpu(mock_bot, mock_interaction):
-    """cpu_percent must be run via run_in_executor, not called directly."""
-    mocks = _psutil_mocks()
+async def test_system_uses_executor_for_all_blocking_calls(mock_bot, mock_interaction):
+    """All blocking psutil calls must go through run_in_executor."""
+    mocks, mock_loop = _make_mocks_and_loop()
 
-    with patch("asyncio.get_event_loop") as mock_loop_fn:
-        mock_loop = MagicMock()
-        mock_loop.run_in_executor = AsyncMock(return_value=33.0)
-        mock_loop_fn.return_value = mock_loop
-        with (
-            patch("psutil.virtual_memory", mocks["psutil.virtual_memory"]),
-            patch("psutil.disk_usage", mocks["psutil.disk_usage"]),
-            patch("psutil.boot_time", mocks["psutil.boot_time"]),
-            patch("platform.system", mocks["platform.system"]),
-            patch("platform.release", mocks["platform.release"]),
-        ):
-            cog = System(mock_bot)
-            await cog.system_status.callback(cog, mock_interaction)
+    with (
+        patch("asyncio.get_running_loop", return_value=mock_loop),
+        patch("psutil.virtual_memory", mocks["psutil.virtual_memory"]),
+        patch("psutil.disk_usage", mocks["psutil.disk_usage"]),
+        patch("psutil.boot_time", mocks["psutil.boot_time"]),
+        patch("platform.system", mocks["platform.system"]),
+        patch("platform.release", mocks["platform.release"]),
+    ):
+        cog = System(mock_bot)
+        await cog.system_status.callback(cog, mock_interaction)
 
-    mock_loop.run_in_executor.assert_called_once()
+    # cpu_percent, virtual_memory, disk_usage, boot_time = 4 executor calls
+    assert mock_loop.run_in_executor.call_count == 4
 
 
 @pytest.mark.asyncio
 async def test_system_utc_timestamp(mock_bot, mock_interaction):
     """Embed timestamp must be timezone-aware."""
-    mocks = _psutil_mocks()
+    mocks, mock_loop = _make_mocks_and_loop()
 
-    with patch("asyncio.get_event_loop") as mock_loop_fn:
-        mock_loop = MagicMock()
-        mock_loop.run_in_executor = AsyncMock(return_value=10.0)
-        mock_loop_fn.return_value = mock_loop
-        with (
-            patch("psutil.virtual_memory", mocks["psutil.virtual_memory"]),
-            patch("psutil.disk_usage", mocks["psutil.disk_usage"]),
-            patch("psutil.boot_time", mocks["psutil.boot_time"]),
-            patch("platform.system", mocks["platform.system"]),
-            patch("platform.release", mocks["platform.release"]),
-        ):
-            cog = System(mock_bot)
-            await cog.system_status.callback(cog, mock_interaction)
+    with (
+        patch("asyncio.get_running_loop", return_value=mock_loop),
+        patch("psutil.virtual_memory", mocks["psutil.virtual_memory"]),
+        patch("psutil.disk_usage", mocks["psutil.disk_usage"]),
+        patch("psutil.boot_time", mocks["psutil.boot_time"]),
+        patch("platform.system", mocks["platform.system"]),
+        patch("platform.release", mocks["platform.release"]),
+    ):
+        cog = System(mock_bot)
+        await cog.system_status.callback(cog, mock_interaction)
 
     embed = mock_interaction.followup.send.call_args.kwargs.get("embed")
     assert embed.timestamp is not None

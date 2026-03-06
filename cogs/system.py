@@ -1,5 +1,6 @@
 import asyncio
 import platform
+from datetime import datetime, timezone
 
 import discord
 import psutil
@@ -15,17 +16,17 @@ class System(commands.Cog):
     async def system_status(self, interaction: discord.Interaction):
         await interaction.response.defer()
 
-        # Run blocking psutil calls off the event loop
-        loop = asyncio.get_event_loop()
-        cpu_usage = await loop.run_in_executor(None, psutil.cpu_percent, 1)
-        ram = psutil.virtual_memory()
-        disk = psutil.disk_usage("/")
-        uptime = discord.utils.format_dt(
-            discord.utils.utcnow()
-            .replace(second=0, microsecond=0)
-            .__class__.fromtimestamp(psutil.boot_time()),
-            style="F",
+        # Run all blocking psutil calls off the event loop
+        loop = asyncio.get_running_loop()
+        cpu_usage, ram, disk, boot_time = await asyncio.gather(
+            loop.run_in_executor(None, psutil.cpu_percent, 1),
+            loop.run_in_executor(None, psutil.virtual_memory),
+            loop.run_in_executor(None, psutil.disk_usage, "/"),
+            loop.run_in_executor(None, psutil.boot_time),
         )
+
+        boot_dt = datetime.fromtimestamp(boot_time, tz=timezone.utc)
+        uptime = discord.utils.format_dt(boot_dt, style="F")
 
         embed = discord.Embed(
             title="🖥️ System Status (LXC)",
@@ -36,7 +37,10 @@ class System(commands.Cog):
         embed.add_field(name="CPU Usage", value=f"**{cpu_usage}%**", inline=True)
         embed.add_field(
             name="RAM Usage",
-            value=f"**{ram.percent}%** ({round(ram.used / (1024**2))}MB / {round(ram.total / (1024**2))}MB)",
+            value=(
+                f"**{ram.percent}%** "
+                f"({round(ram.used / (1024**2))}MB / {round(ram.total / (1024**2))}MB)"
+            ),
             inline=True,
         )
         embed.add_field(

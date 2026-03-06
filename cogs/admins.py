@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-networkadmin_role_id = int(os.getenv("NETWORKADMIN_ROLE_ID") or 0)
+NETWORKADMIN_ROLE_ID = int(os.getenv("NETWORKADMIN_ROLE_ID") or 0)
 
 
 class Admin(commands.Cog):
@@ -15,7 +15,7 @@ class Admin(commands.Cog):
         self.bot = bot
 
     @app_commands.command(name="reload", description="Reloads a specific cog")
-    @app_commands.checks.has_role(networkadmin_role_id)
+    @app_commands.checks.has_role(NETWORKADMIN_ROLE_ID)
     async def reload(self, interaction: discord.Interaction, extension: str):
         try:
             await self.bot.reload_extension(f"cogs.{extension}")

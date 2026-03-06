@@ -83,9 +83,26 @@ async def test_clear_success_reports_count(mock_bot, mock_interaction):
 
 
 @pytest.mark.asyncio
-async def test_clear_purge_exception_sends_ephemeral(mock_bot, mock_interaction):
-    mock_interaction.channel.purge = AsyncMock(side_effect=Exception("boom"))
+async def test_clear_forbidden_sends_ephemeral(mock_bot, mock_interaction):
+    mock_interaction.channel.purge = AsyncMock(
+        side_effect=discord.Forbidden(MagicMock(), "Missing Permissions")
+    )
     cog = General(mock_bot)
     await cog.clear.callback(cog, mock_interaction, 5)
     call_kwargs = mock_interaction.followup.send.call_args
     assert call_kwargs.kwargs.get("ephemeral") is True
+    # Raw exception must not be leaked to the user
+    assert "Missing Permissions" not in call_kwargs.args[0]
+
+
+@pytest.mark.asyncio
+async def test_clear_http_exception_does_not_leak_raw_error(mock_bot, mock_interaction):
+    mock_interaction.channel.purge = AsyncMock(
+        side_effect=discord.HTTPException(MagicMock(), "internal error details")
+    )
+    cog = General(mock_bot)
+    await cog.clear.callback(cog, mock_interaction, 5)
+    call_kwargs = mock_interaction.followup.send.call_args
+    assert call_kwargs.kwargs.get("ephemeral") is True
+    # Raw exception message must not be forwarded to Discord
+    assert "internal error details" not in call_kwargs.args[0]

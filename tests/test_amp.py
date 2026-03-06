@@ -18,6 +18,7 @@ from cogs.amp import (
     _find_instance,
     _RUNNING_STATES,
     _STOPPED_STATES,
+    _HIDDEN_STATES,
     _STATE_COLOUR,
     AMP,
 )
@@ -305,3 +306,184 @@ async def test_amp_console_sanitises_backticks(mock_bot, mock_interaction):
     output_field = next(f for f in embed.fields if f.name == "Recent output")
     assert "```backticks```" not in output_field.value
     assert "'''backticks'''" in output_field.value
+
+
+# ------------------------------------------------------------------ #
+#  /amp restart                                                        #
+# ------------------------------------------------------------------ #
+
+
+@pytest.mark.asyncio
+async def test_amp_restart_not_found(mock_bot, mock_interaction):
+    with patch("cogs.amp._find_instance", AsyncMock(return_value=None)):
+        cog = AMP(mock_bot)
+        await cog.amp_restart.callback(cog, mock_interaction, "ghost")
+    call_kwargs = mock_interaction.followup.send.call_args
+    assert call_kwargs.kwargs.get("ephemeral") is True
+    assert "not found" in call_kwargs.args[0].lower()
+
+
+@pytest.mark.asyncio
+async def test_amp_restart_success(mock_bot, mock_interaction):
+    inst = make_mock_instance(app_state=AMPInstanceState.ready)
+    with patch("cogs.amp._find_instance", AsyncMock(return_value=inst)):
+        cog = AMP(mock_bot)
+        await cog.amp_restart.callback(cog, mock_interaction, "TestInstance")
+    inst.restart_instance.assert_called_once()
+    call_kwargs = mock_interaction.followup.send.call_args
+    assert call_kwargs.kwargs.get("ephemeral") is None or not call_kwargs.kwargs.get(
+        "ephemeral"
+    )
+
+
+@pytest.mark.asyncio
+async def test_amp_restart_connection_error(mock_bot, mock_interaction):
+    inst = make_mock_instance(app_state=AMPInstanceState.ready)
+    inst.restart_instance = AsyncMock(side_effect=ConnectionError)
+    with patch("cogs.amp._find_instance", AsyncMock(return_value=inst)):
+        cog = AMP(mock_bot)
+        await cog.amp_restart.callback(cog, mock_interaction, "TestInstance")
+    call_kwargs = mock_interaction.followup.send.call_args
+    assert call_kwargs.kwargs.get("ephemeral") is True
+    assert "offline" in call_kwargs.args[0].lower()
+
+
+# ------------------------------------------------------------------ #
+#  /amp kill                                                           #
+# ------------------------------------------------------------------ #
+
+
+@pytest.mark.asyncio
+async def test_amp_kill_not_found(mock_bot, mock_interaction):
+    with patch("cogs.amp._find_instance", AsyncMock(return_value=None)):
+        cog = AMP(mock_bot)
+        await cog.amp_kill.callback(cog, mock_interaction, "ghost")
+    call_kwargs = mock_interaction.followup.send.call_args
+    assert call_kwargs.kwargs.get("ephemeral") is True
+    assert "not found" in call_kwargs.args[0].lower()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("state", list(_STOPPED_STATES))
+async def test_amp_kill_already_stopped(mock_bot, mock_interaction, state):
+    inst = make_mock_instance(app_state=state)
+    with patch("cogs.amp._find_instance", AsyncMock(return_value=inst)):
+        cog = AMP(mock_bot)
+        await cog.amp_kill.callback(cog, mock_interaction, "TestInstance")
+    inst.kill_application.assert_not_called()
+    assert mock_interaction.followup.send.call_args.kwargs.get("ephemeral") is True
+
+
+@pytest.mark.asyncio
+async def test_amp_kill_success(mock_bot, mock_interaction):
+    inst = make_mock_instance(app_state=AMPInstanceState.ready)
+    with patch("cogs.amp._find_instance", AsyncMock(return_value=inst)):
+        cog = AMP(mock_bot)
+        await cog.amp_kill.callback(cog, mock_interaction, "TestInstance")
+    inst.kill_application.assert_called_once()
+    call_kwargs = mock_interaction.followup.send.call_args
+    assert "force-killed" in call_kwargs.args[0].lower()
+
+
+@pytest.mark.asyncio
+async def test_amp_kill_connection_error(mock_bot, mock_interaction):
+    inst = make_mock_instance(app_state=AMPInstanceState.ready)
+    inst.kill_application = AsyncMock(side_effect=ConnectionError)
+    with patch("cogs.amp._find_instance", AsyncMock(return_value=inst)):
+        cog = AMP(mock_bot)
+        await cog.amp_kill.callback(cog, mock_interaction, "TestInstance")
+    call_kwargs = mock_interaction.followup.send.call_args
+    assert call_kwargs.kwargs.get("ephemeral") is True
+    assert "not available" in call_kwargs.args[0].lower()
+
+
+# ------------------------------------------------------------------ #
+#  /amp stats                                                          #
+# ------------------------------------------------------------------ #
+
+
+@pytest.mark.asyncio
+async def test_amp_stats_not_found(mock_bot, mock_interaction):
+    with patch("cogs.amp._find_instance", AsyncMock(return_value=None)):
+        cog = AMP(mock_bot)
+        await cog.amp_stats.callback(cog, mock_interaction, "ghost")
+    call_kwargs = mock_interaction.followup.send.call_args
+    assert call_kwargs.kwargs.get("ephemeral") is True
+    assert "not found" in call_kwargs.args[0].lower()
+
+
+@pytest.mark.asyncio
+async def test_amp_stats_not_running(mock_bot, mock_interaction):
+    inst = make_mock_instance(app_state=AMPInstanceState.stopped)
+    with patch("cogs.amp._find_instance", AsyncMock(return_value=inst)):
+        cog = AMP(mock_bot)
+        await cog.amp_stats.callback(cog, mock_interaction, "TestInstance")
+    inst.get_status.assert_not_called()
+    assert mock_interaction.followup.send.call_args.kwargs.get("ephemeral") is True
+
+
+@pytest.mark.asyncio
+async def test_amp_stats_success_with_metrics(mock_bot, mock_interaction):
+    inst = make_mock_instance(app_state=AMPInstanceState.ready)
+
+    cpu = MagicMock()
+    cpu.percent = 42
+    cpu.raw_value = 42
+    cpu.max_value = 100
+    cpu.units = "%"
+
+    mem = MagicMock()
+    mem.percent = 60
+    mem.raw_value = 2048
+    mem.max_value = 4096
+    mem.units = "MB"
+
+    metrics = MagicMock()
+    metrics.cpu_usage = cpu
+    metrics.memory_usage = mem
+    metrics.active_users = None
+
+    status = MagicMock()
+    status.metrics = metrics
+    inst.get_status = AsyncMock(return_value=status)
+
+    with patch("cogs.amp._find_instance", AsyncMock(return_value=inst)):
+        cog = AMP(mock_bot)
+        await cog.amp_stats.callback(cog, mock_interaction, "TestInstance")
+
+    embed = mock_interaction.followup.send.call_args.kwargs.get("embed")
+    assert embed is not None
+    field_names = [f.name for f in embed.fields]
+    assert "CPU Usage" in field_names
+    assert "Memory Usage" in field_names
+
+
+@pytest.mark.asyncio
+async def test_amp_stats_no_metrics(mock_bot, mock_interaction):
+    inst = make_mock_instance(app_state=AMPInstanceState.ready)
+    status = MagicMock()
+    status.metrics = None
+    inst.get_status = AsyncMock(return_value=status)
+
+    with patch("cogs.amp._find_instance", AsyncMock(return_value=inst)):
+        cog = AMP(mock_bot)
+        await cog.amp_stats.callback(cog, mock_interaction, "TestInstance")
+
+    embed = mock_interaction.followup.send.call_args.kwargs.get("embed")
+    assert "no metrics" in embed.description.lower()
+
+
+@pytest.mark.asyncio
+async def test_amp_stats_action_result_error(mock_bot, mock_interaction):
+    from ampapi import ActionResultError
+
+    inst = make_mock_instance(app_state=AMPInstanceState.ready)
+    inst.get_status = AsyncMock(return_value=MagicMock(spec=ActionResultError))
+
+    with patch("cogs.amp._find_instance", AsyncMock(return_value=inst)):
+        cog = AMP(mock_bot)
+        await cog.amp_stats.callback(cog, mock_interaction, "TestInstance")
+
+    call_kwargs = mock_interaction.followup.send.call_args
+    assert call_kwargs.kwargs.get("ephemeral") is True
+    assert "could not retrieve" in call_kwargs.args[0].lower()

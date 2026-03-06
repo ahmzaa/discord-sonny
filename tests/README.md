@@ -10,15 +10,15 @@ Quick reference for the Sonny test suite. Tests are split into **unit tests** (p
 tests/
     conftest.py       # Shared fixtures: mock_bot, mock_interaction, make_mock_instance
     test_bot.py       # Env var validation (4 tests)
-    test_amp.py       # AMP cog logic (26 tests)
+    test_amp.py       # AMP cog logic (34 test functions)
     test_events.py    # Welcome embed + on_member_join (10 tests)
-    test_general.py   # /ping, /clear commands (7 tests)
+    test_general.py   # /ping, /clear commands (9 tests)
     test_system.py    # /system command (4 tests)
     test_admins.py    # /reload command (3 tests)
     smoke_test.py     # Integration smoke test — NOT collected by pytest automatically
 ```
 
-**Total unit tests: 71**
+**Total unit test functions: 64**
 
 ---
 
@@ -93,20 +93,26 @@ await cog.my_command.callback(cog, mock_interaction, arg1, arg2)
 
 ### `test_amp.py` — AMP Cog
 - `_state_label` parametrised across all `AMPInstanceState` values
-- `_find_instance` patches `_get_all_instances` to avoid real AMP connections
-- `/amp start` and `/amp stop` parametrised over `_RUNNING_STATES` and `_STOPPED_STATES`
-- `/amp stop` `ConnectionError` path asserts `"not available"` (not `"already offline"`)
+- `_find_instance` patches `_get_all_instances` to avoid real AMP connections; covers match by friendly name, match by instance name, not-found, and empty list
 - `/amp status` asserts embed is returned with correct colour from `_STATE_COLOUR`
-- `/amp list` asserts `failed` instances are filtered by default; shown with `show_all=True`
+- `/amp start` parametrised over `_RUNNING_STATES` for the already-running guard; covers success and `ConnectionError`
+- `/amp stop` parametrised over `_STOPPED_STATES` for the already-stopped guard; covers success and `ConnectionError` (asserts `"not available"`, not `"already offline"`)
+- `/amp list` asserts `failed` and `stopped` instances are filtered by default; shown with `show_all=True`; empty result sends ephemeral message
+- `/amp players` asserts guard when instance is not ready; empty player list; player names in embed
 - `/amp console` asserts triple backticks in output are replaced with `'''`
+- `/amp restart` covers not_found, success, and `ConnectionError` paths
+- `/amp kill` parametrised over `_STOPPED_STATES` for the already-stopped guard; covers not_found, success, and `ConnectionError`
+- `/amp stats` covers not_found, not_running, success with metrics, no metrics, and `ActionResultError` from `get_status`
 
 ### `test_events.py` — Events Cog
 - `member.mention` is present in the welcome embed description
 - No `"a<@&"` pattern in output (missing-space bug regression)
 - Embed timestamp is timezone-aware (UTC)
-- `add_roles` called with the correct role ID
+- Embed colour matches `discord.Color.from_rgb(0, 176, 244)`
+- `add_roles` called with the correct role object on member join
 - No exception raised when `get_role` returns `None`
 - `discord.Forbidden` on `add_roles` handled gracefully — prints error, does not raise
+- `channel.send` called once with a `discord.Embed` on member join
 - `channel.send` not called when channel is not a `TextChannel`
 - `/testwelcome` sends an ephemeral embed
 
@@ -115,16 +121,17 @@ await cog.my_command.callback(cog, mock_interaction, arg1, arg2)
 - `/clear` with amount `0` or negative → ephemeral error, `purge` not called
 - `/clear` in wrong channel type → ephemeral error, `purge` not called
 - `/clear` success → `purge` called with the correct limit, deleted count reported
-- `/clear` exception from `purge` → ephemeral error sent
+- `/clear` `discord.Forbidden` from `purge` → ephemeral error sent, raw exception not leaked
+- `/clear` `discord.HTTPException` from `purge` → ephemeral error sent, raw message not forwarded to Discord
 
 ### `test_system.py` — System Cog
 - `response.defer()` called before `followup.send()`
-- Embed contains all required fields: CPU, RAM, Disk, OS, LXC Booted Since
-- `run_in_executor` called for blocking `cpu_percent` call
+- Embed contains all required fields: CPU Usage, RAM Usage, Disk Space, OS, LXC Booted Since
+- `run_in_executor` called exactly 4 times for all blocking psutil calls (`cpu_percent`, `virtual_memory`, `disk_usage`, `boot_time`) via `asyncio.get_running_loop()`
 - Embed timestamp is timezone-aware
 
 ### `test_admins.py` — Admins Cog
-- `/reload` success: `reload_extension` called, success message sent
+- `/reload` success: `reload_extension` called with correct extension path, success message sent ephemeral
 - `ExtensionNotFound`: logs to stdout, sends sanitised message (not the raw exception) to Discord
 - Unexpected `RuntimeError`: internal error path not leaked to Discord
 

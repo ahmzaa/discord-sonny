@@ -28,7 +28,7 @@ AMP_PASS = os.getenv("AMP_PASS") or ""
 
 _params = APIParams(url=AMP_URL, user=AMP_USER, password=AMP_PASS)
 
-networkadmin_role_id = int(os.getenv("NETWORKADMIN_ROLE_ID") or 0)
+NETWORKADMIN_ROLE_ID = int(os.getenv("NETWORKADMIN_ROLE_ID") or 0)
 
 # State labels and corresponding embed colours
 _STATE_COLOUR = {
@@ -51,6 +51,12 @@ _RUNNING_STATES = {
 _STOPPED_STATES = {
     AMPInstanceState.stopped,
     AMPInstanceState.stopping,
+}
+
+# States hidden from /amp list by default (not actively running)
+_HIDDEN_STATES = {
+    AMPInstanceState.stopped,
+    AMPInstanceState.failed,
 }
 
 
@@ -89,8 +95,8 @@ async def _find_instance(
 
 class AMP(commands.GroupCog, name="amp"):
     def __init__(self, bot):
-        self.bot = bot
         super().__init__()
+        self.bot = bot
 
     # ------------------------------------------------------------------ #
     #  /amp status                                                         #
@@ -137,8 +143,6 @@ class AMP(commands.GroupCog, name="amp"):
         try:
             instances = await _get_all_instances(session)
 
-            _hidden_states = {AMPInstanceState.stopped, AMPInstanceState.failed}
-
             rows = []
             for instance in instances:
                 if not isinstance(
@@ -146,14 +150,14 @@ class AMP(commands.GroupCog, name="amp"):
                 ):
                     continue
                 state_enum = instance.app_state
-                if not show_all and state_enum in _hidden_states:
+                if not show_all and state_enum in _HIDDEN_STATES:
                     continue
                 state = _state_label(instance)
                 colour_indicator = (
                     "🟢"
                     if state_enum == AMPInstanceState.ready
                     else "🔴"
-                    if state_enum in _hidden_states
+                    if state_enum in _HIDDEN_STATES
                     else "🟡"
                 )
                 rows.append(
@@ -268,10 +272,11 @@ class AMP(commands.GroupCog, name="amp"):
                     f"Restarting instance `{instance.friendly_name}`..."
                 )
             except ConnectionError:
-                await interaction.followup.send(
-                    f"Instance `{instance.friendly_name}` is offline and cannot be restarted. Use `/amp start` instead.",
-                    ephemeral=True,
+                msg = (
+                    f"Instance `{instance.friendly_name}` is offline and cannot be "
+                    "restarted. Use `/amp start` instead."
                 )
+                await interaction.followup.send(msg, ephemeral=True)
         finally:
             await session.close()
 
@@ -294,8 +299,10 @@ class AMP(commands.GroupCog, name="amp"):
                 return
 
             if instance.app_state != AMPInstanceState.ready:
+                state = _state_label(instance)
                 await interaction.followup.send(
-                    f"Instance `{instance.friendly_name}` is not running.",
+                    f"Instance `{instance.friendly_name}` is not ready "
+                    f"(current state: **{state}**).",
                     ephemeral=True,
                 )
                 return
@@ -355,8 +362,10 @@ class AMP(commands.GroupCog, name="amp"):
                 return
 
             if instance.app_state != AMPInstanceState.ready:
+                state = _state_label(instance)
                 await interaction.followup.send(
-                    f"Instance `{instance.friendly_name}` is not running.",
+                    f"Instance `{instance.friendly_name}` is not ready "
+                    f"(current state: **{state}**).",
                     ephemeral=True,
                 )
                 return
@@ -421,7 +430,7 @@ class AMP(commands.GroupCog, name="amp"):
         name="console",
         description="[Admin] Send a console command to an AMP instance.",
     )
-    @app_commands.checks.has_role(networkadmin_role_id)
+    @app_commands.checks.has_role(NETWORKADMIN_ROLE_ID)
     async def amp_console(
         self,
         interaction: discord.Interaction,
@@ -439,8 +448,10 @@ class AMP(commands.GroupCog, name="amp"):
                 return
 
             if instance.app_state != AMPInstanceState.ready:
+                state = _state_label(instance)
                 await interaction.followup.send(
-                    f"Instance `{instance.friendly_name}` is not running.",
+                    f"Instance `{instance.friendly_name}` is not ready "
+                    f"(current state: **{state}**).",
                     ephemeral=True,
                 )
                 return
@@ -455,29 +466,39 @@ class AMP(commands.GroupCog, name="amp"):
                 return
 
             # Fetch recent console output for confirmation
+            console_block: str
             try:
                 updates = await instance.get_updates(format_data=True)
-                entries = (
-                    updates.console_entries[-5:] if updates.console_entries else []
-                )
-                if entries:
-                    output = "\n".join(f"[{e.source}] {e.contents}" for e in entries)
-                    # Sanitise triple backticks to prevent markdown escape
-                    output = output.replace("```", "'''")
-                    console_block = f"```\n{output}\n```"
+                if isinstance(updates, ActionResultError):
+                    console_block = "*Could not retrieve console output.*"
                 else:
-                    console_block = "*No console output returned.*"
+                    entries = (
+                        updates.console_entries[-5:] if updates.console_entries else []
+                    )
+                    if entries:
+                        output = "\n".join(
+                            f"[{e.source}] {e.contents}" for e in entries
+                        )
+                        # Sanitise triple backticks to prevent markdown escape
+                        output = output.replace("```", "'''")
+                        console_block = f"```\n{output}\n```"
+                    else:
+                        console_block = "*No console output returned.*"
             except Exception as e:
                 print(
                     f"Error fetching console updates for {instance.friendly_name}: {e}"
                 )
                 console_block = "*Could not retrieve console output.*"
 
+            # Sanitise user-supplied command string before displaying in embed
+            safe_command = command.replace("`", "'")
             embed = discord.Embed(
                 title=f"Console — {instance.friendly_name}",
                 color=discord.Color.blurple(),
             )
-            embed.add_field(name="Command sent", value=f"`{command}`", inline=False)
+            embed.add_field(
+                name="Command sent", value=f"`{safe_command}`", inline=False
+            )
             embed.add_field(name="Recent output", value=console_block, inline=False)
             await interaction.followup.send(embed=embed)
         finally:
@@ -499,7 +520,7 @@ class AMP(commands.GroupCog, name="amp"):
         name="kill",
         description="[Admin] Force-kill a hung AMP instance.",
     )
-    @app_commands.checks.has_role(networkadmin_role_id)
+    @app_commands.checks.has_role(NETWORKADMIN_ROLE_ID)
     async def amp_kill(self, interaction: discord.Interaction, instance_name: str):
         await interaction.response.defer()
         session = aiohttp.ClientSession()
@@ -511,9 +532,9 @@ class AMP(commands.GroupCog, name="amp"):
                 )
                 return
 
-            if instance.app_state == AMPInstanceState.stopped:
+            if instance.app_state in _STOPPED_STATES:
                 await interaction.followup.send(
-                    f"Instance `{instance.friendly_name}` is already stopped.",
+                    f"Instance `{instance.friendly_name}` is already offline or stopping.",
                     ephemeral=True,
                 )
                 return
