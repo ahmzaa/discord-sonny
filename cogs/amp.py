@@ -1,9 +1,10 @@
 import os
+from typing import Union
+
 import aiohttp
 import discord
 from discord import app_commands
 from discord.ext import commands
-from typing import Union
 from dotenv import load_dotenv
 
 from ampapi import (
@@ -13,8 +14,6 @@ from ampapi import (
     AMPInstance,
     AMPInstanceState,
     AMPMinecraftInstance,
-    AnalyticsFilter,
-    AnalyticsSummary,
     APIParams,
     Bridge,
     Players,
@@ -29,7 +28,7 @@ AMP_PASS = os.getenv("AMP_PASS") or ""
 
 _params = APIParams(url=AMP_URL, user=AMP_USER, password=AMP_PASS)
 
-networkadmin_role_id = int(os.getenv("NETWORKADMIN_ROLE_ID"))
+networkadmin_role_id = int(os.getenv("NETWORKADMIN_ROLE_ID") or 0)
 
 # State labels and corresponding embed colours
 _STATE_COLOUR = {
@@ -41,14 +40,31 @@ _STATE_COLOUR = {
     AMPInstanceState.failed: discord.Color.dark_red(),
 }
 
+# States that indicate an instance is already running or coming up
+_RUNNING_STATES = {
+    AMPInstanceState.ready,
+    AMPInstanceState.starting,
+    AMPInstanceState.restarting,
+}
+
+# States that indicate an instance is already offline or going offline
+_STOPPED_STATES = {
+    AMPInstanceState.stopped,
+    AMPInstanceState.stopping,
+}
+
 
 def _state_label(instance: AMPInstance) -> str:
     """Return a human-readable state string from an instance's app_state."""
-    return str(instance.app_state).rsplit(".")[1].capitalize()
+    return str(instance.app_state).split(".")[-1].capitalize()
 
 
 async def _get_all_instances(session: aiohttp.ClientSession) -> list:
-    """Return all ADS instances as a flat list."""
+    """Return all ADS instances as a flat list.
+
+    Bridge() must be called first to register the singleton that
+    AMPControllerInstance resolves internally via Bridge._get_bridge().
+    """
     Bridge(api_params=_params)
     ADS: AMPControllerInstance = AMPControllerInstance(session=session)
     ADS.format_data = False
@@ -94,9 +110,13 @@ class AMP(commands.GroupCog, name="amp"):
                 )
                 return
             state = _state_label(instance)
-            await interaction.followup.send(
-                f"Instance `{instance.friendly_name}` is `{state}`"
+            colour = _STATE_COLOUR.get(instance.app_state, discord.Color.greyple())
+            embed = discord.Embed(
+                title=instance.friendly_name,
+                description=f"State: **{state}**",
+                color=colour,
             )
+            await interaction.followup.send(embed=embed)
         finally:
             await session.close()
 
@@ -105,7 +125,7 @@ class AMP(commands.GroupCog, name="amp"):
     # ------------------------------------------------------------------ #
     @app_commands.command(
         name="list",
-        description="List AMP instances. Use show_all to include stopped instances.",
+        description="List AMP instances. Use show_all to include stopped/failed instances.",
     )
     async def amp_list(
         self,
@@ -117,6 +137,8 @@ class AMP(commands.GroupCog, name="amp"):
         try:
             instances = await _get_all_instances(session)
 
+            _hidden_states = {AMPInstanceState.stopped, AMPInstanceState.failed}
+
             rows = []
             for instance in instances:
                 if not isinstance(
@@ -124,14 +146,14 @@ class AMP(commands.GroupCog, name="amp"):
                 ):
                     continue
                 state_enum = instance.app_state
-                if not show_all and state_enum == AMPInstanceState.stopped:
+                if not show_all and state_enum in _hidden_states:
                     continue
                 state = _state_label(instance)
                 colour_indicator = (
                     "🟢"
                     if state_enum == AMPInstanceState.ready
                     else "🔴"
-                    if state_enum == AMPInstanceState.stopped
+                    if state_enum in _hidden_states
                     else "🟡"
                 )
                 rows.append(
@@ -170,9 +192,9 @@ class AMP(commands.GroupCog, name="amp"):
                 )
                 return
 
-            if instance.app_state == AMPInstanceState.ready:
+            if instance.app_state in _RUNNING_STATES:
                 await interaction.followup.send(
-                    f"Instance `{instance.friendly_name}` is already running.",
+                    f"Instance `{instance.friendly_name}` is already running or starting.",
                     ephemeral=True,
                 )
                 return
@@ -205,9 +227,9 @@ class AMP(commands.GroupCog, name="amp"):
                 )
                 return
 
-            if instance.app_state == AMPInstanceState.stopped:
+            if instance.app_state in _STOPPED_STATES:
                 await interaction.followup.send(
-                    f"Instance `{instance.friendly_name}` is already offline.",
+                    f"Instance `{instance.friendly_name}` is already offline or stopping.",
                     ephemeral=True,
                 )
                 return
@@ -219,7 +241,7 @@ class AMP(commands.GroupCog, name="amp"):
                 )
             except ConnectionError:
                 await interaction.followup.send(
-                    f"Instance `{instance.friendly_name}` is already offline.",
+                    f"Instance `{instance.friendly_name}` is not available.",
                     ephemeral=True,
                 )
         finally:
@@ -279,7 +301,9 @@ class AMP(commands.GroupCog, name="amp"):
                 return
 
             try:
-                players: Players = await instance.get_user_list(format_data=True)
+                players: Union[
+                    Players, ActionResultError
+                ] = await instance.get_user_list(format_data=True)
             except ConnectionError:
                 await interaction.followup.send(
                     f"Instance `{instance.friendly_name}` is not available.",
@@ -354,9 +378,10 @@ class AMP(commands.GroupCog, name="amp"):
                 return
 
             metrics = status.metrics
+            colour = _STATE_COLOUR.get(instance.app_state, discord.Color.greyple())
             embed = discord.Embed(
                 title=f"Stats — {instance.friendly_name}",
-                color=discord.Color.green(),
+                color=colour,
             )
 
             if metrics:
@@ -437,10 +462,15 @@ class AMP(commands.GroupCog, name="amp"):
                 )
                 if entries:
                     output = "\n".join(f"[{e.source}] {e.contents}" for e in entries)
+                    # Sanitise triple backticks to prevent markdown escape
+                    output = output.replace("```", "'''")
                     console_block = f"```\n{output}\n```"
                 else:
                     console_block = "*No console output returned.*"
-            except Exception:
+            except Exception as e:
+                print(
+                    f"Error fetching console updates for {instance.friendly_name}: {e}"
+                )
                 console_block = "*Could not retrieve console output.*"
 
             embed = discord.Embed(
@@ -511,5 +541,5 @@ class AMP(commands.GroupCog, name="amp"):
             )
 
 
-async def setup(bot):
+async def setup(bot: commands.Bot):
     await bot.add_cog(AMP(bot))

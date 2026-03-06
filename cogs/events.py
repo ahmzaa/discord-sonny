@@ -1,52 +1,55 @@
 import os
+from typing import Union
+
 import discord
+from discord import app_commands
 from discord.ext import commands
 from dotenv import load_dotenv
-from datetime import datetime
 
 load_dotenv()
 
-channel_general = os.getenv("GENERAL_CHANNEL_ID")
-channel_support = os.getenv("SUPPORT_CHANNEL_ID")
-channel_vc_text = os.getenv("VC_TEXT_CHANNEL_ID")
-dcadmin_role_id = os.getenv("DCADMIN_ROLE_ID")
-networkadmin_role_id = os.getenv("NETWORKADMIN_ROLE_ID")
+GENERAL_CHANNEL_ID = os.getenv("GENERAL_CHANNEL_ID") or ""
+SUPPORT_CHANNEL_ID = os.getenv("SUPPORT_CHANNEL_ID") or ""
+VC_TEXT_CHANNEL_ID = os.getenv("VC_TEXT_CHANNEL_ID") or ""
+DCADMIN_ROLE_ID = os.getenv("DCADMIN_ROLE_ID") or ""
+NETWORKADMIN_ROLE_ID = os.getenv("NETWORKADMIN_ROLE_ID") or ""
 
 
 # --- EVENT: MEMBER JOIN, AUTO ROLE & WELCOME MESSAGE
 class Events(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        # Pulling these from .env inside the Cog
-        self.welcome_channel_id = int(os.getenv("WELCOME_CHANNEL_ID"))
-        self.initial_member_role_id = int(os.getenv("INITIAL_MEMBER_ROLE_ID"))
+        self.welcome_channel_id = int(os.getenv("WELCOME_CHANNEL_ID") or 0)
+        self.initial_member_role_id = int(os.getenv("INITIAL_MEMBER_ROLE_ID") or 0)
 
-    def create_welcome_embed(self, member: discord.Member):
+    def create_welcome_embed(
+        self, member: Union[discord.Member, discord.User]
+    ) -> discord.Embed:
         embed = discord.Embed(
             title="Welcome 🎉🎉",
             description=(
                 f"Welcome to the ahmza discord server {member.mention}.\n\n"
-                f"Before you can do much you will need to be assigned a role by a"
-                f"<@&{dcadmin_role_id}> or <@&{networkadmin_role_id}>"
+                f"Before you can do much you will need to be assigned a role by a "
+                f"<@&{DCADMIN_ROLE_ID}> or <@&{NETWORKADMIN_ROLE_ID}>"
             ),
-            colour=0x00B0F4,
-            timestamp=datetime.now(),
+            color=discord.Color.from_rgb(0, 176, 244),
+            timestamp=discord.utils.utcnow(),
         )
 
         embed.add_field(
             name="Key Info",
             value=(
                 f"Once you have your role checkout these pages:\n\n"
-                f"- <#{channel_general}> - For general conversation\n"
-                f"- <#{channel_support}> - For support with ahmza.com services\n"
-                f"- <#{channel_vc_text}> - For messages while in voice chat"
+                f"- <#{GENERAL_CHANNEL_ID}> - For general conversation\n"
+                f"- <#{SUPPORT_CHANNEL_ID}> - For support with ahmza.com services\n"
+                f"- <#{VC_TEXT_CHANNEL_ID}> - For messages while in voice chat"
             ),
             inline=False,
         )
 
         embed.set_footer(
             text="I hope you enjoy your stay.",
-            icon_url="https://cdn.discordapp.com/app-icons/1477746789493899449/b439974fe19aaf9143bd3be7f36fd593.png?size=256",
+            icon_url=self.bot.user.display_avatar.url if self.bot.user else None,
         )
         return embed
 
@@ -59,22 +62,44 @@ class Events(commands.Cog):
                 await member.add_roles(role)
             except discord.Forbidden:
                 print(f"Error: Bot lacks permission to assign roles to {member.name}.")
-            except Exception as e:
-                print(f"An unexpected error occurred: {e}")
+            except discord.HTTPException as e:
+                print(
+                    f"An unexpected error occurred assigning role to {member.name}: {e}"
+                )
 
         # --- Send the welcome message ---
         channel = self.bot.get_channel(self.welcome_channel_id)
-        if channel:
+        if isinstance(channel, discord.TextChannel):
             embed = self.create_welcome_embed(member)
-            await channel.send(embed=embed)
+            try:
+                await channel.send(embed=embed)
+            except discord.Forbidden:
+                print(
+                    f"Error: Bot lacks permission to send in welcome channel {self.welcome_channel_id}."
+                )
+            except discord.HTTPException as e:
+                print(f"Failed to send welcome message: {e}")
 
-    @commands.command(name="testwelcome")
-    @commands.has_permissions(administrator=True)
-    async def test_welcome(self, ctx):
-        # --- Manually trigger welcome message to test embed ---
-        embed = self.create_welcome_embed(ctx.author)
+    # ------------------------------------------------------------------ #
+    #  /testwelcome                                                        #
+    # ------------------------------------------------------------------ #
+    @app_commands.command(
+        name="testwelcome",
+        description="Preview the welcome embed (admin only).",
+    )
+    @app_commands.checks.has_permissions(administrator=True)
+    async def test_welcome(self, interaction: discord.Interaction):
+        embed = self.create_welcome_embed(interaction.user)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
-        await ctx.send(embed=embed)
+    @test_welcome.error
+    async def test_welcome_error(
+        self, interaction: discord.Interaction, error: app_commands.AppCommandError
+    ):
+        if isinstance(error, app_commands.MissingPermissions):
+            await interaction.response.send_message(
+                "You don't have permission to use this command.", ephemeral=True
+            )
 
 
 async def setup(bot: commands.Bot):

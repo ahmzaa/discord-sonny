@@ -1,9 +1,10 @@
+import asyncio
+import platform
+
 import discord
+import psutil
 from discord import app_commands
 from discord.ext import commands
-import psutil
-import platform
-import datetime
 
 
 class System(commands.Cog):
@@ -12,19 +13,24 @@ class System(commands.Cog):
 
     @app_commands.command(name="system", description="Check the LXC container health")
     async def system_status(self, interaction: discord.Interaction):
-        # Gathering system data
-        cpu_usage = psutil.cpu_percent(interval=1)
+        await interaction.response.defer()
+
+        # Run blocking psutil calls off the event loop
+        loop = asyncio.get_event_loop()
+        cpu_usage = await loop.run_in_executor(None, psutil.cpu_percent, 1)
         ram = psutil.virtual_memory()
         disk = psutil.disk_usage("/")
-        uptime = datetime.datetime.fromtimestamp(psutil.boot_time()).strftime(
-            "%Y-%m-%d %H:%M:%S"
+        uptime = discord.utils.format_dt(
+            discord.utils.utcnow()
+            .replace(second=0, microsecond=0)
+            .__class__.fromtimestamp(psutil.boot_time()),
+            style="F",
         )
 
-        # Creating the status embed
         embed = discord.Embed(
             title="🖥️ System Status (LXC)",
             color=discord.Color.green(),
-            timestamp=datetime.datetime.now(),
+            timestamp=discord.utils.utcnow(),
         )
 
         embed.add_field(name="CPU Usage", value=f"**{cpu_usage}%**", inline=True)
@@ -43,8 +49,8 @@ class System(commands.Cog):
 
         embed.set_footer(text=f"Bot Latency: {round(self.bot.latency * 1000)}ms")
 
-        await interaction.response.send_message(embed=embed)
+        await interaction.followup.send(embed=embed)
 
 
-async def setup(bot):
+async def setup(bot: commands.Bot):
     await bot.add_cog(System(bot))

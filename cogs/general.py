@@ -17,16 +17,23 @@ class General(commands.Cog):
     async def clear(self, interaction: discord.Interaction, amount: int):
         await interaction.response.defer(ephemeral=True)
         if amount < 1:
-            await interaction.followup.send("Please specify a number greater than 0.")
+            await interaction.followup.send(
+                "Please specify a number greater than 0.", ephemeral=True
+            )
+            return
+        if not isinstance(interaction.channel, discord.TextChannel):
+            await interaction.followup.send(
+                "This command can only be used in a text channel.", ephemeral=True
+            )
             return
         try:
             deleted = await interaction.channel.purge(limit=amount)
             await interaction.followup.send(
-                f"Successfully purged {len(deleted)} messages of heresey!",
+                f"Successfully purged {len(deleted)} messages of heresy!",
                 ephemeral=True,
             )
         except Exception as e:
-            await interaction.followup.send(f"An Error occurred: {e}", ephemeral=True)
+            await interaction.followup.send(f"An error occurred: {e}", ephemeral=True)
 
     @clear.error
     async def clear_error(
@@ -45,5 +52,5 @@ class General(commands.Cog):
             print(f"Clear Command Error: {error}")
 
 
-async def setup(bot):
+async def setup(bot: commands.Bot):
     await bot.add_cog(General(bot))

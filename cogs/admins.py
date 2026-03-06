@@ -1,4 +1,5 @@
 import os
+
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -6,7 +7,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-networkadmin_role_id = int(os.getenv("NETWORKADMIN_ROLE_ID"))
+networkadmin_role_id = int(os.getenv("NETWORKADMIN_ROLE_ID") or 0)
 
 
 class Admin(commands.Cog):
@@ -14,20 +15,26 @@ class Admin(commands.Cog):
         self.bot = bot
 
     @app_commands.command(name="reload", description="Reloads a specific cog")
-    @app_commands.checks.has_role(
-        networkadmin_role_id
-    )  # Only the bot creator can run this
+    @app_commands.checks.has_role(networkadmin_role_id)
     async def reload(self, interaction: discord.Interaction, extension: str):
         try:
-            # We use the internal load/unload logic
             await self.bot.reload_extension(f"cogs.{extension}")
             await interaction.response.send_message(
                 f"✅ Extension `{extension}` reloaded!", ephemeral=True
             )
+        except commands.ExtensionError as e:
+            print(f"Failed to reload extension '{extension}': {e}")
+            await interaction.response.send_message(
+                f"❌ Failed to reload `{extension}`. Check bot logs for details.",
+                ephemeral=True,
+            )
         except Exception as e:
-            await interaction.response.send_message(f"❌ Error: {e}", ephemeral=True)
+            print(f"Unexpected error reloading extension '{extension}': {e}")
+            await interaction.response.send_message(
+                "❌ An unexpected error occurred. Check bot logs for details.",
+                ephemeral=True,
+            )
 
-    # Simple error handler if someone else tries to use it
     @reload.error
     async def reload_error(
         self, interaction: discord.Interaction, error: app_commands.AppCommandError
@@ -38,5 +45,5 @@ class Admin(commands.Cog):
             )
 
 
-async def setup(bot):
+async def setup(bot: commands.Bot):
     await bot.add_cog(Admin(bot))

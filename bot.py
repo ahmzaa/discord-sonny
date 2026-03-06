@@ -1,9 +1,29 @@
 import os
+
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
 
 load_dotenv()
+
+_REQUIRED_ENV = [
+    "TOKEN",
+    "GUILD_ID",
+    "NETWORKADMIN_ROLE_ID",
+    "WELCOME_CHANNEL_ID",
+    "INITIAL_MEMBER_ROLE_ID",
+    "GENERAL_CHANNEL_ID",
+    "SUPPORT_CHANNEL_ID",
+    "VC_TEXT_CHANNEL_ID",
+    "DCADMIN_ROLE_ID",
+    "AMP_URL",
+    "AMP_USER",
+    "AMP_PASS",
+]
+
+_missing = [k for k in _REQUIRED_ENV if not os.getenv(k)]
+if _missing:
+    raise RuntimeError(f"Missing required environment variables: {', '.join(_missing)}")
 
 
 class Sonny(commands.Bot):
@@ -21,15 +41,15 @@ class Sonny(commands.Bot):
             if filename.endswith(".py"):
                 try:
                     await self.load_extension(f"cogs.{filename[:-3]}")
-                    print(f"Loeaded: {filename}")
+                    print(f"Loaded: {filename}")
                 except Exception as e:
                     print(f"Failed to load {filename}: {e}")
 
         # Syncing commands
-        MY_GUILD = discord.Object(id=os.getenv("GUILD_ID"))
+        MY_GUILD = discord.Object(id=int(os.getenv("GUILD_ID") or 0))
         self.tree.copy_global_to(guild=MY_GUILD)
         await self.tree.sync(guild=MY_GUILD)
-        print(f"--- SLASH COMMANDS SYNCED ---")
+        print("--- SLASH COMMANDS SYNCED ---")
 
     async def on_ready(self):
         print(f"--- Logged in as {self.user} ---")
@@ -43,4 +63,4 @@ class Sonny(commands.Bot):
 
 
 bot = Sonny()
-bot.run(os.getenv("TOKEN"))
+bot.run(os.getenv("TOKEN") or "")
