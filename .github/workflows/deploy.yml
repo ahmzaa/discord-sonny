@@ -1,0 +1,27 @@
+name: Deploy
+on:
+  push:
+    branches:
+      - main
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Connect to NetBird
+        uses: Alemiz112/netbird-connect@v1
+        with:
+          setup-key: ${{ secrets.NETBIRD_SETUP_KEY }}
+          management-url: ${{ secrets.NETBIRD_MANAGEMENT_URL }}
+          hostname: github-actions-deploy
+      - name: Wait for NetBird peer
+        run: sleep 5
+      - name: Deploy to server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          port: ${{ secrets.SSH_PORT }}
+          script: |
+            git -C /opt/discord-sonny pull
+            sudo systemctl restart discord-sonny
